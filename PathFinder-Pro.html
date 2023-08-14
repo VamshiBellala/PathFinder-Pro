@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en-US">
+    <head>
+        <title>PathFinder Pro -- Vamshi</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=0, minimum-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+        <meta name="author" content="Aryan M">
+        <meta name="description" content="Easily schedule and sign up for appointments.">
+        <meta name="keywords" content="Aryan M Games, AryanM, Scheduler, AryanM Scheduler">
+        <meta name="language" content="English">
+        <link rel="icon" href="icon.png">
+        <style>
+            body {
+                font-family:Verdana, Geneva, Tahoma, sans-serif;
+                text-align:center;
+                background-color:#F4B41A;
+                /*Blue: #143D59*/
+                -webkit-touch-callout: none;
+                -webkit-user-select: none;
+                -khtml-user-select: none;
+                -moz-user-select: none;
+                -ms-user-select: none; 
+                user-select: none;
+            }
+            canvas {
+                border:1px solid black;
+                background-color:white;
+                touch-action: manipulation;
+            }
+            #title {
+                font-size:1.8em;
+                font-weight:bold;
+            }
+            #info {
+                font-size:1em;
+            }
+            #gridWidth {
+                width:4em;
+            }
+            #centeredForRange, #stepsPerTick {
+                display:inline-block;
+                vertical-align:middle;
+            }
+            button {
+                font-weight:bold;
+                padding-left:0.5em;
+                padding-right:0.5em;
+                padding-top:0.2em;
+                padding-bottom:0.2em;
+                border-radius:5px;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="title">MazeMaker</div>
+        <div id="info">Bellala Vamshi<br>(Explanation in <a href="https://github.com/VamshiBellala/PathFinder-Pro/" target="_blank">README</a>)</div><br>
+        <div id="centeredForRange">
+            <label for="stepsPerTick">Speed: </label> <input type="range" id="stepsPerTick" min="0" max="200" value="1" oninput="stepsPerTick = Number(this.value); document.getElementById('showStepsPerTick').innerHTML = this.value;" onchange="stepsPerTick = Number(this.value); document.getElementById('showStepsPerTick').innerHTML = this.value;">
+            <span id="showStepsPerTick">1</span>
+        </div>
+        <div>Grid Size: <input type="number" id="gridWidth" value="20"> <button onclick="start()">START</button> <button id="solutionButton" onclick="showSolution()" disabled>ANSWER</button></div><br>
+        <canvas id="canvas">Your browser does not support the Canvas element. This won't work!</canvas>
+    </body>
+    <script>
+        var c = document.getElementById("canvas");
+        var ctx = c.getContext("2d", { alpha: false });
+        c.width = 500;
+        c.height = 500;
+        if(window.innerWidth < 500) { c.width = window.innerWidth-10; c.height = window.innerWidth-10; }
+        var WIDTH = c.width;
+        var HEIGHT = c.height;
+        var gridWidth = 20;
+        var gridHeight = 20;
+        var cells = [];
+        var snake = [];
+        var changedCells = [];
+        var changedSnakeCells = [];
+        var solution = [];
+        var interval;
+        var mouseDown = false;
+        var cursorX;
+        var cursorY;
+        var done = false;
+        var finished = false;
+
+        function colorCell(e, fromClick) {
+            var dim = c.getBoundingClientRect();
+            cursorX = Math.floor((e.clientX - dim.left)*gridWidth/WIDTH);
+            cursorY = Math.floor((e.clientY - dim.top)*gridHeight/HEIGHT);
+            var valid = false;
+            if(!done || cursorX < 0 || cursorY < 0 || cursorX > gridWidth-1 || cursorY > gridHeight-1 || (e.shiftKey !== undefined && !mouseDown)) {
+                return;
+            }
+            if((e.shiftKey || fromClick) && cells[cursorX][cursorY].colored) {
+                valid = true; //just trying to erase
+            }
+            else if(cursorX === 0 && cursorY === 0) {
+                valid = true;
+            }
+            else if(cursorY > 0 && cells[cursorX][cursorY-1].colored && !cells[cursorX][cursorY].sides[0]){
+                valid = true; //valid to the north
+            }
+            else if(cursorX < gridWidth-1 && cells[cursorX+1][cursorY].colored && !cells[cursorX][cursorY].sides[1]) {
+                valid = true; //east
+            }
+            else if(cursorY < gridWidth-1 && cells[cursorX][cursorY+1].colored && !cells[cursorX][cursorY].sides[2]) {
+                valid = true; //south
+            }
+            else if(cursorX > 0 && cells[cursorX-1][cursorY].colored && !cells[cursorX][cursorY].sides[3]) {
+                valid = true; //west
+            }
+            if(valid) { //e.shiftkey is undefined on mobile
+                cells[cursorX][cursorY].colored = (fromClick ? !cells[cursorX][cursorY].colored : !e.shiftKey);
+                cells[cursorX][cursorY].draw();
+                if(cursorX === 0 && cursorY === 0) {
+                    drawSF();
+                } else if(cursorX === gridWidth-1 && cursorY === gridHeight-1) {
+                    finished = true;
+                    drawSF();
+                }
+            }
+        }
+        function onMouseDown(e) {
+            mouseDown = true;
+            colorCell(e, true);
+        }
+        function mouseMove(e) {
+            colorCell(e);
+        }
+        c.addEventListener("mousemove", (e) => {
+            mouseMove(e);
+        });
+        c.addEventListener("touchmove", (e) => {
+            e.preventDefault();
+            if(e.touches) { e = e.touches[0]; }
+            mouseMove(e);
+            return false;
+        })
+        c.addEventListener("mousedown", function(e) {
+            onMouseDown(e);
+        });
+        
+        document.onmouseup = function(e) {
+            mouseDown = false;
+        }
+
+        function rect(x, y, w, h) {
+            ctx.beginPath();
+            ctx.rect(x*WIDTH/gridWidth, y*HEIGHT/gridHeight, w*WIDTH/gridWidth, h*HEIGHT/gridHeight);
+            ctx.closePath();
+            ctx.fill();
+        }
+        function line(x, y, x2, y2) {
+		    ctx.beginPath();
+		    ctx.moveTo(x*WIDTH/gridWidth, y*HEIGHT/gridHeight);
+		    ctx.lineTo(x2*WIDTH/gridWidth, y2*HEIGHT/gridHeight);
+		    ctx.closePath();
+		    ctx.stroke();
+		}
+        function clear() {
+            ctx.clearRect(0, 0, WIDTH, HEIGHT);
+        }
+
+        function Cell(x, y) {
+            this.x = x;
+            this.y = y;
+            this.visited = false;
+            this.colored = false;
+            this.sides = [true, true, true, true]; //N, E, S, W
+            this.draw = function(inSnake) {
+                ctx.fillStyle = (inSnake ? "red" : (this.visited ? (this.colored ? "lime" : "white") : "gray"));
+                rect(this.x, this.y, 1, 1);
+                ctx.fillStyle = "black";
+                if(this.sides[0]) {
+                    line(this.x, this.y, this.x + 1, this.y);
+                }
+                if(this.sides[1]) {
+                    line(this.x+1, this.y, this.x+1, this.y+1);
+                }
+                if(this.sides[2]) {
+                    line(this.x, this.y+1, this.x+1, this.y+1);
+                }
+                if(this.sides[3]) {
+                    line(this.x, this.y, this.x, this.y+1);
+                }
+            }
+        }
+
+        var stepsPerTick = 1;
+
+        function draw() {
+            for(var i = 0; i < changedSnakeCells.length; ++i) {
+                changedSnakeCells[i].draw(true);
+            }
+            for(var i = 0; i < changedCells.length; ++i) {
+                changedCells[i].draw();
+            }
+            
+            changedCells = [];
+            changedSnakeCells = [];
+
+            for(var i = 0; i < stepsPerTick; ++i) {
+                if(!done) {
+                    if(snake.length === 0) { //done!
+                        done = true;
+                        draw();
+                        stop();
+                        break;
+                    } else {
+                        snakeStep();
+                    }
+                }
+            }
+        }
+
+        function snakeStep() {
+            var top = snake[snake.length-1];
+            var order = shuffleArray(["N", "E", "S", "W"]);
+            var found = false;
+            if(top.x === gridWidth-1 && top.y === gridHeight-1) {
+                solution = snake.slice(); //.slice() copies array
+            }
+            for(var i = 0; i < order.length; ++i) {
+                if(order[i] === "N" && top.y > 0 && !cells[top.x][top.y-1].visited) { //go north
+                    cells[top.x][top.y-1].visited = true;
+                    cells[top.x][top.y-1].sides[2] = false;
+                    cells[top.x][top.y].sides[0] = false;
+                    changedSnakeCells.push(...[cells[top.x][top.y], cells[top.x][top.y-1]]);
+                    snake.push(cells[top.x][top.y-1]);
+                    found = true;
+                    break;
+                }
+                else if(order[i] === "E" && top.x < gridWidth-1 && !cells[top.x+1][top.y].visited) {
+                    cells[top.x+1][top.y].visited = true;
+                    cells[top.x+1][top.y].sides[3] = false;
+                    cells[top.x][top.y].sides[1] = false;
+                    changedSnakeCells.push(...[cells[top.x][top.y], cells[top.x+1][top.y]]);
+                    snake.push(cells[top.x+1][top.y]);
+                    found = true;
+                    break;
+                }
+                else if(order[i] === "S" && top.y < gridHeight-1 && !cells[top.x][top.y+1].visited) {
+                    cells[top.x][top.y+1].visited = true;
+                    cells[top.x][top.y+1].sides[0] = false;
+                    cells[top.x][top.y].sides[2] = false;
+                    changedSnakeCells.push(...[cells[top.x][top.y], cells[top.x][top.y+1]]);
+                    snake.push(cells[top.x][top.y+1]);
+                    found = true;
+                    break;
+                }
+                else if(order[i] === "W" && top.x > 0 && !cells[top.x-1][top.y].visited) {
+                    cells[top.x-1][top.y].visited = true;
+                    cells[top.x-1][top.y].sides[1] = false;
+                    cells[top.x][top.y].sides[3] = false;
+                    changedSnakeCells.push(...[cells[top.x][top.y], cells[top.x-1][top.y]]);
+                    snake.push(cells[top.x-1][top.y]);
+                    found = true;
+                    break;
+                }
+            }
+
+            if(!found) {
+                changedCells.push(snake.pop());
+            }
+        }
+
+        function showSolution() {
+            for(var i = 0; i < gridWidth; ++i) {
+                for(var j = 0; j < gridHeight; ++j) {
+                    if(cells[i][j].colored) {
+                        cells[i][j].colored = false;
+                        cells[i][j].draw();
+                    }
+                }
+            }
+            for(var i = 0; i < solution.length; ++i) {
+                if(!cells[solution[i].x][solution[i].y].colored) {
+                    cells[solution[i].x][solution[i].y].colored = true;
+                    cells[solution[i].x][solution[i].y].draw();
+                }
+            }
+            finished = true;
+            drawSF();
+        }
+
+        function start() {
+            done = false;
+            finished = false;
+
+            gridWidth = Number(document.getElementById("gridWidth").value);
+            gridHeight = Number(document.getElementById("gridWidth").value);
+
+            if(gridWidth < 1) { alert("Please choose a grid size greater than 1."); return; }
+
+            document.getElementById("solutionButton").disabled = true;
+
+            cells = [];
+            snake = [];
+
+            for(var i = 0; i < gridWidth; ++i) {
+                cells.push([]);
+                for(var j = 0; j < gridHeight; ++j) {
+                    cells[i].push(new Cell(i, j));
+                }
+            }
+
+            snake.push(cells[0][0]);
+            cells[0][0].visited = true;
+            cells[0][0].sides[0] = false;
+            
+            c.style.border = "1px solid black";
+            clear();
+            interval = setInterval(draw, 1);
+        }
+        
+        function stop() {
+            done = true;
+            finished = false;
+            clearInterval(interval);
+            cells[gridWidth-1][gridHeight-1].sides[2] = false;
+            changedCells = [cells[gridWidth-1][gridHeight-1]]; changedSnakeCells = [];
+            draw();
+            changedCells = [];
+            drawSF();
+            c.style.border = "none";
+            document.getElementById("solutionButton").disabled = false;
+        }
+
+        function drawSF() {
+            ctx.font = "bold 16px Arial";
+            ctx.textAlign = "center";
+            
+            ctx.textBaseline = "top";
+            ctx.fillStyle = "green";
+            rect(0, -0.6, 1, 1);
+            ctx.fillText("S", 0.5*WIDTH/gridWidth, 0.4*HEIGHT/gridHeight);
+
+            ctx.textBaseline = "bottom";
+            if(!finished) { ctx.fillStyle = "red"; }
+            rect(gridWidth-1, gridHeight-1 + 0.6, 1, 1);
+            ctx.fillText("F", WIDTH-0.5*WIDTH/gridWidth, HEIGHT-0.4*HEIGHT/gridHeight);
+        }
+
+        function shuffleArray(array) {
+            for(let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        function init() {
+            ctx.fillStyle = "white";
+            rect(0, 0, gridWidth, gridHeight);
+        }
+        init();
+
+        window.onbeforeunload = function () {
+            window.scrollTo(0, 0);
+        }
+    </script>
+</html>
